@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open Drive</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#7ec8ee}
+  canvas{display:block}
+  #h{position:fixed;left:12px;top:10px;color:#fff;font:14px system-ui,sans-serif;text-shadow:0 1px 3px #000}
+</style>
+<div id="h">WASD</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+<script>
+const SIZE = 40, R = 3;
+const k = { w: 0, a: 0, s: 0, d: 0 };
+addEventListener('keydown', e => { const c = e.key.toLowerCase(); if (c in k) { k[c] = 1; e.preventDefault(); } });
+addEventListener('keyup', e => { const c = e.key.toLowerCase(); if (c in k) k[c] = 0; });
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x7ec8ee);
+scene.fog = new THREE.Fog(0x7ec8ee, 55, 130);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+scene.add(new THREE.HemisphereLight(0xbfdfff, 0x3a5a30, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2d6, 0.85);
+sun.position.set(20, 40, 10);
+scene.add(sun);
+
+const geo = {
+  box: new THREE.BoxGeometry(1, 1, 1),
+  cone: new THREE.ConeGeometry(1, 2, 5),
+  trunk: new THREE.CylinderGeometry(0.18, 0.22, 1, 5),
+  ground: new THREE.PlaneGeometry(SIZE, SIZE),
+};
+const mat = {
+  car: new THREE.MeshLambertMaterial({ color: 0xd22 }),
+  glass: new THREE.MeshLambertMaterial({ color: 0x234 }),
+  tire: new THREE.MeshLambertMaterial({ color: 0x111 }),
+  asphalt: new THREE.MeshLambertMaterial({ color: 0x3a3a42 }),
+  grass: new THREE.MeshLambertMaterial({ color: 0x3f8a3a }),
+  leaf: new THREE.MeshLambertMaterial({ color: 0x2d6a28 }),
+  bark: new THREE.MeshLambertMaterial({ color: 0x5a3a18 }),
+  barn: new THREE.MeshLambertMaterial({ color: 0x8a4030 }),
+  brick: [0x6a7380, 0x8a8070, 0x5c656c, 0x9a9088].map(c => new THREE.MeshLambertMaterial({ color: c })),
+};
+
+function rnd(cx, cz, i) {
+  const t = Math.sin(cx * 127.1 + cz * 311.7 + i * 74.7) * 43758.5453;
+  return t - Math.floor(t);
+}
+function isCity(cx, cz) {
+  return ((Math.floor(cx / 4) + Math.floor(cz / 4)) & 1) === 0;
+}
+
+function makeChunk(cx, cz) {
+  const g = new THREE.Group();
+  g.position.set(cx * SIZE, 0, cz * SIZE);
+  const city = isCity(cx, cz);
+  const ground = new THREE.Mesh(geo.ground, city ? mat.asphalt : mat.grass);
+  ground.rotation.x = -Math.PI / 2;
+  g.add(ground);
+  if (city) {
+    const n = 8 + (rnd(cx, cz, 0) * 6 | 0);
+    for (let i = 0; i < n; i++) {
+      const h = 6 + rnd(cx, cz, i + 3) * 22;
+      const w = 3 + rnd(cx, cz, i + 40) * 5;
+      const d = 3 + rnd(cx, cz, i + 80) * 5;
+      const b = new THREE.Mesh(geo.box, mat.brick[i & 3]);
+      b.scale.set(w, h, d);
+      b.position.set((rnd(cx, cz, i + 9) - 0.5) * (SIZE - w), h / 2, (rnd(cx, cz, i + 17) - 0.5) * (SIZE - d));
+      if (cx * cx + cz * cz === 0 && b.position.length() < 8) continue;
+      g.add(b);
+    }
+  } else {
+    const n = 10 + (rnd(cx, cz, 1) * 10 | 0);
+    for (let i = 0; i < n; i++) {
+      const x = (rnd(cx, cz, i + 5) - 0.5) * (SIZE - 4);
+      const z = (rnd(cx, cz, i + 13) - 0.5) * (SIZE - 4);
+      const s = 0.8 + rnd(cx, cz, i + 21) * 1.4;
+      const trunk = new THREE.Mesh(geo.trunk, mat.bark);
+      trunk.scale.set(1, 1.4 * s, 1);
+      trunk.position.set(x, 0.7 * s, z);
+      const leaf = new THREE.Mesh(geo.cone, mat.leaf);
+      leaf.scale.set(s, s * 1.3, s);
+      leaf.position.set(x, 1.8 * s, z);
+      g.add(trunk, leaf);
+    }
+    if (rnd(cx, cz, 99) > 0.55) {
+      const barn = new THREE.Mesh(geo.box, mat.barn);
+      barn.scale.set(6, 4, 8);
+      barn.position.set((rnd(cx, cz, 70) - 0.5) * 16, 2, (rnd(cx, cz, 71) - 0.5) * 16);
+      g.add(barn);
+    }
+  }
+  scene.add(g);
+  return g;
+}
+
+const live = new Map();
+function syncChunks(x, z) {
+  const cx = Math.round(x / SIZE), cz = Math.round(z / SIZE);
+  const want = new Set();
+  for (let i = -R; i <= R; i++) for (let j = -R; j <= R; j++) {
+    const key = (cx + i) + ',' + (cz + j);
+    want.add(key);
+    if (!live.has(key)) live.set(key, makeChunk(cx + i, cz + j));
+  }
+  for (const [key, g] of live) if (!want.has(key)) { scene.remove(g); live.delete(key); }
+}
+
+const car = new THREE.Group();
+const body = new THREE.Mesh(geo.box, mat.car);
+body.scale.set(1.6, 0.45, 3.2);
+body.position.y = 0.55;
+const cabin = new THREE.Mesh(geo.box, mat.glass);
+cabin.scale.set(1.35, 0.42, 1.4);
+cabin.position.set(0, 0.92, -0.25);
+car.add(body, cabin);
+for (const [x, z] of [[-0.75, 1.05], [0.75, 1.05], [-0.75, -1.05], [0.75, -1.05]]) {
+  const w = new THREE.Mesh(geo.box, mat.tire);
+  w.scale.set(0.28, 0.28, 0.55);
+  w.position.set(x, 0.22, z);
+  car.add(w);
+}
+scene.add(car);
+
+let spd = 0, yaw = 0;
+const clock = new THREE.Clock();
+syncChunks(0, 0);
+camera.position.set(0, 6, -12);
+
+function tick() {
+  const dt = Math.min(0.05, clock.getDelta());
+  spd += (k.w - k.s * 0.7) * 36 * dt;
+  spd -= spd * 1.6 * dt;
+  if (spd > 46) spd = 46;
+  if (spd < -16) spd = -16;
+  yaw += (k.d - k.a) * 1.7 * dt * Math.min(1, Math.abs(spd) / 6);
+  car.position.x += Math.sin(yaw) * spd * dt;
+  car.position.z += Math.cos(yaw) * spd * dt;
+  car.position.y = 0;
+  car.rotation.set(0, yaw, 0);
+  syncChunks(car.position.x, car.position.z);
+
+  const tx = car.position.x - Math.sin(yaw) * 11;
+  const tz = car.position.z - Math.cos(yaw) * 11;
+  const a = Math.min(1, 8 * dt);
+  camera.position.x += (tx - camera.position.x) * a;
+  camera.position.z += (tz - camera.position.z) * a;
+  camera.position.y += (5.5 - camera.position.y) * a;
+  camera.lookAt(car.position.x, 1.2, car.position.z);
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
